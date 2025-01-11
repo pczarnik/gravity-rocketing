@@ -881,5 +881,5 @@ class LunarLanderContinuous:
 
 
 if __name__ == "__main__":
-    env = gym.make("LunarLander-v3", render_mode="rgb_array")
+    env = gym.make("LunarLander-v3", render_mode="human")
     demo_heuristic_lander(env, render=True)

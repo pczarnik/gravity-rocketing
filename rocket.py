@@ -4,6 +4,7 @@ import numpy as np
 
 import gymnasium as gym
 from gymnasium.error import DependencyNotInstalled
+from gymnasium.utils.step_api_compatibility import step_api_compatibility
 
 import Box2D
 from Box2D.b2 import (
@@ -37,7 +38,10 @@ class ContactDetector(contactListener):
 class Rocket(gym.Env):
     def __init__(self, rocket_pos, planets_pos):
         self.planets_pos = planets_pos
-        self.rocket_pos = rocket_pos
+        self.rocket_pos_deg = rocket_pos
+        self.render_mode = "human"
+        self.screen = None
+        self.clock = None
 
         low = np.array(
             [
@@ -66,16 +70,16 @@ class Rocket(gym.Env):
         self.observation_space = gym.spaces.Box(low, high)
         self.action_space = gym.spaces.Discrete(4)
 
-    def reset(self, rocket_pos, planets_pos):
+    def reset(self, rocket_pos_deg=(0, 0, 0), planets_pos=[(-0.5, 0), (0.5, 0)]):
+        self.rocket_pos_deg = rocket_pos_deg
         self.planets_pos = planets_pos
-        self.rocket_pos = rocket_pos
 
         self.world = Box2D.b2World()
         self.world.gravity = (0, 0)
 
         self.rocket = self.world.CreateDynamicBody(
-            position=self.rocket_pos,
-            angle=0.0,
+            position=self.rocket_pos_deg[:2],
+            angle=self.rocket_pos_deg[2],
             fixtures=fixtureDef(
                 shape=polygonShape(box=(0.1, 0.1))
             )
@@ -99,15 +103,15 @@ class Rocket(gym.Env):
 
         self.render()
 
-        return self._get_observation()
+        return self.step(0)[0], {}
 
     def _get_observation(self):
         rocket_pos = self.rocket.position
         rocket_v = self.rocket.linearVelocity
-        rocket_a = self.rocket.linearAcceleration
+        # rocket_a = self.rocket.linearAcceleration
         rocket_theta = self.rocket.angle
         rocket_theta_dot = self.rocket.angularVelocity
-        rocket_theta_acc = self.rocket.angularAcceleration
+        # rocket_theta_acc = self.rocket.angularAcceleration
 
         planets_pos = [planet.position for planet in self.planets]
 
@@ -115,17 +119,21 @@ class Rocket(gym.Env):
             [
                 rocket_v.x,
                 rocket_v.y,
-                rocket_a.x,
-                rocket_a.y,
+                # rocket_a.x,
+                # rocket_a.y,
                 rocket_theta,
                 rocket_theta_dot,
-                rocket_theta_acc,
+                # rocket_theta_acc,
             ]
             + [np.linalg.norm(rocket_pos - planet_pos) for planet_pos in planets_pos]
         )
     
     def step(self, action):
-        assert self.lander is not None
+        assert self.rocket is not None
+        obs = self._get_observation()
+        reward = 0
+        terminated = False
+        return obs, reward, terminated, False, {}
 
     def render(self):
         if self.render_mode is None:
@@ -154,96 +162,84 @@ class Rocket(gym.Env):
 
         self.surf = pygame.Surface((VIEWPORT_W, VIEWPORT_H))
 
-        pygame.transform.scale(self.surf, (SCALE, SCALE))
-        pygame.draw.rect(self.surf, (255, 255, 255), self.surf.get_rect())
+        self.surf.fill((0, 0, 0))
 
-        for obj in self.particles:
-            obj.ttl -= 0.15
-            obj.color1 = (
-                int(max(0.2, 0.15 + obj.ttl) * 255),
-                int(max(0.2, 0.5 * obj.ttl) * 255),
-                int(max(0.2, 0.5 * obj.ttl) * 255),
+        for planet in self.planets:
+            planet_pos = planet.position
+            planet_pos_screen = (
+                int(VIEWPORT_W / 2 + planet_pos[0] * VIEWPORT_W / 2),
+                int(VIEWPORT_H / 2 - planet_pos[1] * VIEWPORT_H / 2),
             )
-            obj.color2 = (
-                int(max(0.2, 0.15 + obj.ttl) * 255),
-                int(max(0.2, 0.5 * obj.ttl) * 255),
-                int(max(0.2, 0.5 * obj.ttl) * 255),
+            pygame.draw.circle(
+                self.surf,
+                (0, 0, 255),
+                planet_pos_screen,
+                int(0.1 * VIEWPORT_W / 2),
+            )
+            gfxdraw.aacircle(
+                self.surf,
+                planet_pos_screen[0],
+                planet_pos_screen[1],
+                int(0.1 * VIEWPORT_W / 2),
+                (0, 0, 255),
             )
 
-        self._clean_particles(False)
-
-        for p in self.sky_polys:
-            scaled_poly = []
-            for coord in p:
-                scaled_poly.append((coord[0] * SCALE, coord[1] * SCALE))
-            pygame.draw.polygon(self.surf, (0, 0, 0), scaled_poly)
-            gfxdraw.aapolygon(self.surf, scaled_poly, (0, 0, 0))
-
-        for obj in self.particles + self.drawlist:
-            for f in obj.fixtures:
-                trans = f.body.transform
-                if type(f.shape) is circleShape:
-                    pygame.draw.circle(
-                        self.surf,
-                        color=obj.color1,
-                        center=trans * f.shape.pos * SCALE,
-                        radius=f.shape.radius * SCALE,
-                    )
-                    pygame.draw.circle(
-                        self.surf,
-                        color=obj.color2,
-                        center=trans * f.shape.pos * SCALE,
-                        radius=f.shape.radius * SCALE,
-                    )
-
-                else:
-                    path = [trans * v * SCALE for v in f.shape.vertices]
-                    pygame.draw.polygon(self.surf, color=obj.color1, points=path)
-                    gfxdraw.aapolygon(self.surf, path, obj.color1)
-                    pygame.draw.aalines(
-                        self.surf, color=obj.color2, points=path, closed=True
-                    )
-
-                for x in [self.helipad_x1, self.helipad_x2]:
-                    x = x * SCALE
-                    flagy1 = self.helipad_y * SCALE
-                    flagy2 = flagy1 + 50
-                    pygame.draw.line(
-                        self.surf,
-                        color=(255, 255, 255),
-                        start_pos=(x, flagy1),
-                        end_pos=(x, flagy2),
-                        width=1,
-                    )
-                    pygame.draw.polygon(
-                        self.surf,
-                        color=(204, 204, 0),
-                        points=[
-                            (x, flagy2),
-                            (x, flagy2 - 10),
-                            (x + 25, flagy2 - 5),
-                        ],
-                    )
-                    gfxdraw.aapolygon(
-                        self.surf,
-                        [(x, flagy2), (x, flagy2 - 10), (x + 25, flagy2 - 5)],
-                        (204, 204, 0),
-                    )
-
-        self.surf = pygame.transform.flip(self.surf, False, True)
+        rocket_pos = self.rocket.position
+        rocket_pos_screen = (
+            int(VIEWPORT_W / 2 + rocket_pos[0] * VIEWPORT_W / 2),
+            int(VIEWPORT_H / 2 - rocket_pos[1] * VIEWPORT_H / 2),
+        )
+        pygame.draw.polygon(
+            self.surf,
+            (255, 0, 0),
+            [
+            (rocket_pos_screen[0] + int(0.1 * VIEWPORT_W / 2), rocket_pos_screen[1]),
+            (rocket_pos_screen[0] - int(0.1 * VIEWPORT_W / 2), rocket_pos_screen[1] + int(0.1 * VIEWPORT_H / 2)),
+            (rocket_pos_screen[0] - int(0.1 * VIEWPORT_W / 2), rocket_pos_screen[1] - int(0.1 * VIEWPORT_H / 2)),
+            ],
+        )
+        gfxdraw.aapolygon(
+            self.surf,
+            [
+            (rocket_pos_screen[0] + int(0.1 * VIEWPORT_W / 2), rocket_pos_screen[1]),
+            (rocket_pos_screen[0] - int(0.1 * VIEWPORT_W / 2), rocket_pos_screen[1] + int(0.1 * VIEWPORT_H / 2)),
+            (rocket_pos_screen[0] - int(0.1 * VIEWPORT_W / 2), rocket_pos_screen[1] - int(0.1 * VIEWPORT_H / 2)),
+            ],
+            (255, 0, 0),
+        )
 
         if self.render_mode == "human":
             assert self.screen is not None
             self.screen.blit(self.surf, (0, 0))
             pygame.event.pump()
-            self.clock.tick(self.metadata["render_fps"])
+            self.clock.tick(self.metadata.get("reder_fps", 30))
             pygame.display.flip()
         elif self.render_mode == "rgb_array":
             return np.transpose(
                 np.array(pygame.surfarray.pixels3d(self.surf)), axes=(1, 0, 2)
             )
 
+
+def demo_rocket(env, render=False):
+    s, info = env.reset()
+    steps = 0
+    while True:
+        s, r, terminated, truncated, info = step_api_compatibility(env.step(0), True)
+
+        if render:
+            still_open = env.render()
+            if still_open is False:
+                break
+            
+            steps += 1
+            
+        if terminated or truncated:
+            break
+    
+    if render:
+        env.close()
+
+
 if __name__ == "__main__":
-    rocket = Rocket(rocket_pos=(0, 0), planets_pos=[(0, 1), (1, 0)])
-    rocket.reset(rocket_pos=(0, 0), planets_pos=[(0, 1), (1, 0)])
-    rocket.step(0)
+    env = Rocket(rocket_pos=(0, 0), planets_pos=[(0, 1), (1, 0)])
+    demo_rocket(env, render=True)
