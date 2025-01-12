@@ -140,10 +140,12 @@ class Rocket(gym.Env):
         if self.render_mode == "human":
             self.render()
 
-        self.rocket.ApplyTorque(
-            0.000005,
-            True,
-        )
+        # self.rocket.ApplyTorque(
+        #     0.000005,
+        #     True,
+        # )
+
+        self.rocket.linearVelocity = vec2(0.5, 0)
 
         return self.step(0)[0], {}
 
@@ -183,11 +185,11 @@ class Rocket(gym.Env):
 
         self.rocket.ApplyForceToCenter(acc, True)
 
-        self.rocket.ApplyLinearImpulse(
-            0.000001 * self.rocket.linearVelocity / (np.linalg.norm(self.rocket.linearVelocity) + 1e-6),
-            self.rocket.position,
-            True
-        )
+        # self.rocket.ApplyLinearImpulse(
+        #     0.000001 * self.rocket.linearVelocity / (np.linalg.norm(self.rocket.linearVelocity) + 1e-6),
+        #     self.rocket.position,
+        #     True
+        # )
 
         self.world.Step(1.0 / FPS, 6 * 30, 2 * 30)
 
@@ -292,8 +294,8 @@ if __name__ == "__main__":
         rocket_pos_ang_size_mass=(-0.75, -0.75, -np.pi/4, 0.03, 0.1),
         planets_pos_mass=[
             (-0.5, 0.5, 2),
-            (0.5, -0.5, 1),
-            (0.5, 0.5, 1)
+            # (0.5, -0.5, 3),
+            # (0.5, 0.5, 0.5)
         ],
         render_mode="human"
     )
