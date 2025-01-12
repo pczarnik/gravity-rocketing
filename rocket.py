@@ -140,6 +140,11 @@ class Rocket(gym.Env):
         if self.render_mode == "human":
             self.render()
 
+        self.rocket.ApplyTorque(
+            0.000005,
+            True,
+        )
+
         return self.step(0)[0], {}
 
     def _get_observation(self):
@@ -177,6 +182,12 @@ class Rocket(gym.Env):
         acc *= GRAVITY_CONST * self.rocket_mass
 
         self.rocket.ApplyForceToCenter(acc, True)
+
+        self.rocket.ApplyLinearImpulse(
+            0.000001 * self.rocket.linearVelocity / (np.linalg.norm(self.rocket.linearVelocity) + 1e-6),
+            self.rocket.position,
+            True
+        )
 
         self.world.Step(1.0 / FPS, 6 * 30, 2 * 30)
 
