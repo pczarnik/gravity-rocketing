@@ -17,6 +17,7 @@ from Box2D.b2 import (
     revoluteJointDef,
 )
 
+FPS = 30
 VIEWPORT_W = 600
 VIEWPORT_H = 400
 VIEWPORT_MIN = min(VIEWPORT_W, VIEWPORT_H)
@@ -25,70 +26,87 @@ TRANSFORM_VEC = lambda xy: vec2(
     (VIEWPORT_H - VIEWPORT_MIN) / 2 + VIEWPORT_MIN / 2 * (xy[1] + 1),
 )
 TRANSFORM_RADIUS = lambda r: r * VIEWPORT_MIN / 2
+GRAVITY_CONST = 1e-3
+PLANET_DENS = 10
 
 
 class ContactDetector(contactListener):
-    def __init__(self):
+    def __init__(self, env):
         contactListener.__init__(self)
-        self.rocket = None
-        self.planets = []
+        self.env = env
 
     def BeginContact(self, contact):
-        if self.rocket in [contact.fixtureA.body, contact.fixtureB.body]:
+        if (
+            self.env.rocket == contact.fixtureA.body
+            or self.env.rocket == contact.fixtureB.body
+        ):
             print("Rocket hit the planet!")
-            self.rocket.ApplyForceToCenter((0, 10), True)
+            self.env.game_over = True
 
     def EndContact(self, contact):
         pass
 
 
 class Rocket(gym.Env):
-    def __init__(self, rocket_pos_ang_size, planets_pos_rad, render_mode=None):
-        self.rocket_pos_ang_size = rocket_pos_ang_size
-        self.planets_pos_rad = planets_pos_rad
+
+    metadata = {
+        "render_modes": ["human", "rgb_array"],
+        "render_fps": FPS,
+    }
+
+    def __init__(self, rocket_pos_ang_size_mass, planets_pos_mass, render_mode=None):
+        self.rocket_pos_ang_size_mass = rocket_pos_ang_size_mass
+        self.planets_pos_mass = planets_pos_mass
         self.render_mode = render_mode
         self.screen = None
         self.clock = None
+        self.world = None
 
         low = np.array(
             [
                 -10.0,  # v_x
                 -10.0,  # v_y
-                -10.0,   # a_x
-                -10.0,   # a_y
                 -2 * math.pi,  # theta
                 -10.0,  # theta_dot
-                -10.0,  # theta_acc
-            ] + [0] * len(self.planets_pos_rad)  # 0 is the min distance
+            ] + [0] * len(self.planets_pos_mass)  # 0 is the min distance
         ).astype(np.float32)
 
         high = np.array(
             [
                 10.0,  # v_x
                 10.0,  # v_y
-                10.0,   # a_x
-                10.0,   # a_y
                 2 * math.pi,  # theta
                 10.0,  # theta_dot
-                10.0,  # theta_acc
-            ] + [4] * len(self.planets_pos_rad)  # 4 is the max distance
+            ] + [4] * len(self.planets_pos_mass)  # 4 is the max distance
         ).astype(np.float32)
 
         self.observation_space = gym.spaces.Box(low, high)
         self.action_space = gym.spaces.Discrete(4)
 
-    def reset(self):
-        super().reset()
+    def _destroy(self):
+        if self.world is None:
+            return
+        self.world.contactListener = None
+        self.world.DestroyBody(self.rocket)
+        self.rocket = None
+        for planet in self.planets:
+            self.world.DestroyBody(planet)
+        self.planets = []
+        self.world = None
 
-        # self.rocket_pos_ang_size = rocket_pos_ang_size
-        # self.planets_pos = planets_pos
+    def reset(self, *, seed=None):
+        super().reset(seed=seed)
+        self._destroy()
 
-        self.world = Box2D.b2World()
-        self.world.gravity = (0, 0)
+        self.world = Box2D.b2World(gravity=(0, 0))
+        self.world.contactListener_keepref = ContactDetector(self)
+        self.world.contactListener = self.world.contactListener_keepref
+        self.game_over = False
 
-        rocket_pos = self.rocket_pos_ang_size[:2]
-        rocket_deg = self.rocket_pos_ang_size[2]
-        rocket_size = self.rocket_pos_ang_size[3]
+        rocket_pos = self.rocket_pos_ang_size_mass[:2]
+        rocket_deg = self.rocket_pos_ang_size_mass[2]
+        rocket_size = self.rocket_pos_ang_size_mass[3]
+        self.rocket_mass = self.rocket_pos_ang_size_mass[4]
         rocket_shape = [
             (rocket_size, 0),
             (-rocket_size, 0),
@@ -98,29 +116,24 @@ class Rocket(gym.Env):
             position=rocket_pos,
             angle=rocket_deg,
             fixtures=fixtureDef(
-                shape=polygonShape(vertices=rocket_shape)
+                shape=polygonShape(vertices=rocket_shape),
+                density=self.rocket_mass,
             )
         )
         self.rocket.color1 = (128, 128, 128)
         self.rocket.color2 = (128, 128, 128)
 
-        self.rocket.ApplyForceToCenter((0, 10), True)
-
         self.planets = []
-        for planet_pos_rad in self.planets_pos_rad:
+        for planet_pos_mass in self.planets_pos_mass:
             planet = self.world.CreateStaticBody(
-                position=planet_pos_rad[:2], angle=0.0,
+                position=planet_pos_mass[:2], angle=0.0,
                 fixtures=fixtureDef(
-                    shape=circleShape(radius=planet_pos_rad[2])
+                    shape=circleShape(radius=planet_pos_mass[2] / PLANET_DENS)
                 )
             )
             planet.color1 = (255, 255, 255)
             planet.color2 = (255, 255, 255)
             self.planets.append(planet)
-
-        self.world.contactListener = ContactDetector()
-        self.world.contactListener.rocket = self.rocket
-        self.world.contactListener.planets = self.planets
 
         self.drawlist = [self.rocket] + self.planets
 
@@ -132,10 +145,8 @@ class Rocket(gym.Env):
     def _get_observation(self):
         rocket_pos = self.rocket.position
         rocket_v = self.rocket.linearVelocity
-        # rocket_a = self.rocket.linearAcceleration
         rocket_theta = self.rocket.angle
         rocket_theta_dot = self.rocket.angularVelocity
-        # rocket_theta_acc = self.rocket.angularAcceleration
 
         planets_pos = [planet.position for planet in self.planets]
 
@@ -143,20 +154,38 @@ class Rocket(gym.Env):
             [
                 rocket_v.x,
                 rocket_v.y,
-                # rocket_a.x,
-                # rocket_a.y,
                 rocket_theta,
                 rocket_theta_dot,
-                # rocket_theta_acc,
             ]
             + [np.linalg.norm(rocket_pos - planet_pos) for planet_pos in planets_pos]
         )
 
     def step(self, action):
         assert self.rocket is not None
+        assert self.action_space.contains(action)
+
         obs = self._get_observation()
+
+        acc = vec2(0, 0)
+
+        for (x, y, mass) in self.planets_pos_mass:
+            delta = vec2(x, y) - self.rocket.position
+            dist = np.linalg.norm(delta)
+
+            acc += delta * mass / (dist ** 3)
+
+        acc *= GRAVITY_CONST * self.rocket_mass
+
+        self.rocket.ApplyForceToCenter(acc, True)
+
+        self.world.Step(1.0 / FPS, 6 * 30, 2 * 30)
+
         reward = 0
         terminated = False
+        if self.game_over:
+            reward = -100
+            terminated = True
+
         return obs, reward, terminated, False, {}
 
     def render(self):
@@ -219,7 +248,7 @@ class Rocket(gym.Env):
             assert self.screen is not None
             self.screen.blit(self.surf, (0, 0))
             pygame.event.pump()
-            self.clock.tick(self.metadata.get("reder_fps", 30))
+            self.clock.tick(self.metadata["render_fps"])
             pygame.display.flip()
         elif self.render_mode == "rgb_array":
             return np.transpose(
@@ -249,8 +278,12 @@ def demo_rocket(env, render=False):
 
 if __name__ == "__main__":
     env = Rocket(
-        rocket_pos_ang_size=(0, 0, np.pi/4, 0.1),
-        planets_pos_rad=[(-0.5, 0.5, 0.1), (0.5, -0.5, 0.1)],
+        rocket_pos_ang_size_mass=(-0.75, -0.75, -np.pi/4, 0.03, 0.1),
+        planets_pos_mass=[
+            (-0.5, 0.5, 2),
+            (0.5, -0.5, 1),
+            (0.5, 0.5, 1)
+        ],
         render_mode="human"
     )
     demo_rocket(env, render=True)
