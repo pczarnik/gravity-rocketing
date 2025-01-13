@@ -28,6 +28,9 @@ TRANSFORM_VEC = lambda xy: vec2(
 TRANSFORM_RADIUS = lambda r: r * VIEWPORT_MIN / 2
 GRAVITY_CONST = 1e-3
 PLANET_DENS = 10
+EPS = 1e-6
+PULSE_POWER = 1e-4
+ROTATION_POWER = 1e-6
 
 
 class ContactDetector(contactListener):
@@ -36,12 +39,13 @@ class ContactDetector(contactListener):
         self.env = env
 
     def BeginContact(self, contact):
-        if (
-            self.env.rocket == contact.fixtureA.body
-            or self.env.rocket == contact.fixtureB.body
-        ):
-            print("Rocket hit the planet!")
-            self.env.game_over = True
+        if self.env.rocket in [contact.fixtureA.body, contact.fixtureB.body]:
+            if self.env.destination in [contact.fixtureA.body, contact.fixtureB.body]:
+                print("Rocket landed!")
+                self.env.landed = True
+            else:
+                print("Rocket hit the planet!")
+                self.env.game_over = True
 
     def EndContact(self, contact):
         pass
@@ -81,6 +85,11 @@ class Rocket(gym.Env):
         ).astype(np.float32)
 
         self.observation_space = gym.spaces.Box(low, high)
+
+        # 0 - do nothing
+        # 1 - forward impulse
+        # 2 - left rotation impulse
+        # 3 - right rotation impulse
         self.action_space = gym.spaces.Discrete(4)
 
     def _destroy(self):
@@ -101,6 +110,7 @@ class Rocket(gym.Env):
         self.world = Box2D.b2World(gravity=(0, 0))
         self.world.contactListener_keepref = ContactDetector(self)
         self.world.contactListener = self.world.contactListener_keepref
+        self.landed = False
         self.game_over = False
 
         rocket_pos = self.rocket_pos_ang_size_mass[:2]
@@ -135,71 +145,83 @@ class Rocket(gym.Env):
             planet.color2 = (255, 255, 255)
             self.planets.append(planet)
 
+        self.destination = self.planets[-1]
+
         self.drawlist = [self.rocket] + self.planets
 
         if self.render_mode == "human":
             self.render()
 
-        # self.rocket.ApplyTorque(
-        #     0.000005,
-        #     True,
-        # )
-
-        self.rocket.linearVelocity = vec2(0.5, 0)
-
         return self.step(0)[0], {}
-
-    def _get_observation(self):
-        rocket_pos = self.rocket.position
-        rocket_v = self.rocket.linearVelocity
-        rocket_theta = self.rocket.angle
-        rocket_theta_dot = self.rocket.angularVelocity
-
-        planets_pos = [planet.position for planet in self.planets]
-
-        return np.array(
-            [
-                rocket_v.x,
-                rocket_v.y,
-                rocket_theta,
-                rocket_theta_dot,
-            ]
-            + [np.linalg.norm(rocket_pos - planet_pos) for planet_pos in planets_pos]
-        )
 
     def step(self, action):
         assert self.rocket is not None
         assert self.action_space.contains(action)
 
-        obs = self._get_observation()
+        if action == 1:
+            unit_v = vec2(-np.sin(self.rocket.angle), np.cos(self.rocket.angle))
+            force = PULSE_POWER * unit_v
+            self.rocket.ApplyForceToCenter(force, True)
+
+        if action == 2:
+            self.rocket.ApplyTorque(
+                ROTATION_POWER,
+                True,
+            )
+        elif action == 3:
+            self.rocket.ApplyTorque(
+                -ROTATION_POWER,
+                True,
+            )
 
         acc = vec2(0, 0)
-
         for (x, y, mass) in self.planets_pos_mass:
             delta = vec2(x, y) - self.rocket.position
             dist = np.linalg.norm(delta)
 
-            acc += delta * mass / (dist ** 3)
+            acc += delta * mass / (dist ** 3 + EPS)
 
-        acc *= GRAVITY_CONST * self.rocket_mass
-
-        self.rocket.ApplyForceToCenter(acc, True)
-
-        # self.rocket.ApplyLinearImpulse(
-        #     0.000001 * self.rocket.linearVelocity / (np.linalg.norm(self.rocket.linearVelocity) + 1e-6),
-        #     self.rocket.position,
-        #     True
-        # )
+        force = acc * GRAVITY_CONST * self.rocket_mass
+        self.rocket.ApplyForceToCenter(force, True)
 
         self.world.Step(1.0 / FPS, 6 * 30, 2 * 30)
 
+        pos = self.rocket.position
+        vel = self.rocket.linearVelocity
+
+        if max(np.abs(pos)) > 2:
+            self.game_over = True
+
+        state = [
+            pos.x,
+            pos.y,
+            vel.x / FPS,
+            vel.y / FPS,
+            self.rocket.angle,
+            self.rocket.angularVelocity / FPS,
+        ] + [
+            np.linalg.norm(vec2(x, y) - pos)
+            for (x, y, _) in self.planets_pos_mass
+        ]
+
         reward = 0
         terminated = False
-        if self.game_over:
-            reward = -100
+        if self.landed:
+            reward += 100
             terminated = True
 
-        return obs, reward, terminated, False, {}
+        if self.game_over:
+            reward += -100
+            terminated = True
+
+        destination_pos = vec2(*self.planets_pos_mass[-1][:2])
+        destination_dist = np.linalg.norm(destination_pos - pos)
+        reward += 10 * (4 - destination_dist)
+
+        if self.render_mode == "human":
+            self.render()
+
+        return np.array(state, dtype=np.float32), reward, terminated, False, {}
 
     def render(self):
         if self.render_mode is None:
@@ -268,35 +290,51 @@ class Rocket(gym.Env):
                 np.array(pygame.surfarray.pixels3d(self.surf)), axes=(1, 0, 2)
             )
 
+    def close(self):
+        if self.screen is not None:
+            import pygame
+
+            pygame.display.quit()
+            pygame.quit()
+            self.isopen = False
+
+
+def heuristic(env, s):
+    return 1
 
 def demo_rocket(env, render=False):
-    s, info = env.reset()
+    total_reward = 0
     steps = 0
+    s, info = env.reset()
     while True:
-        s, r, terminated, truncated, info = step_api_compatibility(env.step(0), True)
+        a = heuristic(env, s)
+        s, r, terminated, truncated, info = step_api_compatibility(env.step(a), True)
+        total_reward += r
 
         if render:
             still_open = env.render()
             if still_open is False:
                 break
 
-            steps += 1
-
+        if steps % 5 == 0 or terminated or truncated:
+            print("observations:", " ".join([f"{x:+0.2f}" for x in s]))
+            print(f"step {steps} reward {r:+0.2f} total_reward {total_reward:+0.2f}")
+        steps += 1
         if terminated or truncated:
             break
-
     if render:
         env.close()
+    return total_reward
 
 
 if __name__ == "__main__":
     env = Rocket(
-        rocket_pos_ang_size_mass=(-0.75, -0.75, -np.pi/4, 0.03, 0.1),
+        rocket_pos_ang_size_mass=(-0.8, -0.5, -np.pi/4, 0.03, 0.1),
         planets_pos_mass=[
             (-0.5, 0.5, 2),
-            # (0.5, -0.5, 3),
-            # (0.5, 0.5, 0.5)
+            (0.5, -0.5, 3),
+            (0.5, 0.5, 0.5)
         ],
-        render_mode="human"
+        render_mode=""
     )
     demo_rocket(env, render=True)
