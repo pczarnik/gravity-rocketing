@@ -29,7 +29,7 @@ TRANSFORM_RADIUS = lambda r: r * VIEWPORT_MIN / 2
 GRAVITY_CONST = 1e-3
 PLANET_DENS = 10
 EPS = 1e-6
-PULSE_POWER = 1e-4
+PULSE_POWER = 2e-4
 ROTATION_POWER = 1e-6
 
 
@@ -145,7 +145,7 @@ class Rocket(gym.Env):
             planet.color2 = (255, 255, 255)
             self.planets.append(planet)
 
-        self.destination = self.planets[-1]
+        self.destination = self.planets[0]
 
         self.drawlist = [self.rocket] + self.planets
 
@@ -214,7 +214,7 @@ class Rocket(gym.Env):
             reward += -100
             terminated = True
 
-        destination_pos = vec2(*self.planets_pos_mass[-1][:2])
+        destination_pos = vec2(*self.planets_pos_mass[0][:2])
         destination_dist = np.linalg.norm(destination_pos - pos)
         reward += 10 * (4 - destination_dist)
 
@@ -300,7 +300,7 @@ class Rocket(gym.Env):
 
 
 def heuristic(env, s):
-    return 1
+    return np.random.choice([0, 1, 3])
 
 def demo_rocket(env, render=False):
     total_reward = 0
@@ -331,10 +331,10 @@ if __name__ == "__main__":
     env = Rocket(
         rocket_pos_ang_size_mass=(-0.8, -0.5, -np.pi/4, 0.03, 0.1),
         planets_pos_mass=[
+            (0.5, 0.5, 0.5),
             (-0.5, 0.5, 2),
             (0.5, -0.5, 3),
-            (0.5, 0.5, 0.5)
         ],
-        render_mode=""
+        render_mode="human"
     )
     demo_rocket(env, render=True)
