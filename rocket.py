@@ -10,27 +10,27 @@ import Box2D
 from Box2D.b2 import (
     circleShape,
     contactListener,
-    edgeShape,
     fixtureDef,
     polygonShape,
     vec2,
-    revoluteJointDef,
 )
 
 FPS = 30
+SCALE = 1.75
 VIEWPORT_W = 600
 VIEWPORT_H = 400
-VIEWPORT_MIN = min(VIEWPORT_W, VIEWPORT_H)
+VIEWPORT_MIN = min(VIEWPORT_W, VIEWPORT_H) / SCALE
 TRANSFORM_VEC = lambda xy: vec2(
-    (VIEWPORT_W - VIEWPORT_MIN) / 2 + VIEWPORT_MIN / 2 * (xy[0] + 1),
-    (VIEWPORT_H - VIEWPORT_MIN) / 2 + VIEWPORT_MIN / 2 * (xy[1] + 1),
+    (VIEWPORT_W - VIEWPORT_MIN) / 2  + (VIEWPORT_MIN / 2 * (xy[0] + 1)),
+    (VIEWPORT_H - VIEWPORT_MIN) / 2 + (VIEWPORT_MIN / 2 * (xy[1] + 1)),
 )
 TRANSFORM_RADIUS = lambda r: r * VIEWPORT_MIN / 2
 GRAVITY_CONST = 1e-3
 PLANET_DENS = 10
 EPS = 1e-6
 PULSE_POWER = 2e-4
-ROTATION_POWER = 1e-6
+ROTATION_POWER = 5e-8
+RAD2DEG = lambda x: x * 180 / np.pi
 
 
 class ContactDetector(contactListener):
@@ -59,8 +59,9 @@ class Rocket(gym.Env):
     }
 
     def __init__(self, rocket_pos_ang_size_mass, planets_pos_mass, render_mode=None):
-        self.rocket_pos_ang_size_mass = rocket_pos_ang_size_mass
-        self.planets_pos_mass = planets_pos_mass
+        self.rocket_pos_ang_size_mass = np.array(rocket_pos_ang_size_mass, dtype=np.float64)
+        self.planets_pos_mass = np.array(planets_pos_mass, dtype=np.float64)
+
         self.render_mode = render_mode
         self.screen = None
         self.clock = None
@@ -164,12 +165,12 @@ class Rocket(gym.Env):
             self.rocket.ApplyForceToCenter(force, True)
 
         if action == 2:
-            self.rocket.ApplyTorque(
+            self.rocket.ApplyAngularImpulse(
                 ROTATION_POWER,
                 True,
             )
         elif action == 3:
-            self.rocket.ApplyTorque(
+            self.rocket.ApplyAngularImpulse(
                 -ROTATION_POWER,
                 True,
             )
@@ -300,7 +301,48 @@ class Rocket(gym.Env):
 
 
 def heuristic(env, s):
-    return np.random.choice([0, 1, 3])
+    vec2planet = env.planets_pos_mass[0][:2] - s[:2]
+    angle2planet = np.atan2(vec2planet[1], vec2planet[0]) + 3/2*np.pi
+    rocket_angle = s[4]
+    relative_angle = (angle2planet - rocket_angle) % (2*np.pi)
+
+    rocket_speed_dir = np.atan2(s[3], s[2]) + 3/2*np.pi
+    relative_speed_angle = (rocket_speed_dir - angle2planet) % (2*np.pi)
+
+    speed = np.linalg.norm(s[2:4])
+    rot_speed = s[5]
+
+    relative_angle = relative_angle / np.pi
+    relative_speed_angle = relative_speed_angle / np.pi
+
+    relative_angle = (1 - relative_angle) % 2 - 1
+    relative_speed_angle = (1 - relative_speed_angle) % 2 - 1
+
+    action = 0
+    if relative_angle < -0.1 and rot_speed <= 0.04:
+        print(1)
+        action = 2
+    elif relative_angle > 0.1 and rot_speed >= -0.04:
+        print(2)
+        action = 3
+
+    if relative_angle < -0.1 and abs(relative_speed_angle) > 0.4 and rot_speed <= 0.07:
+        print(3)
+        action = 2
+    elif relative_angle > 0.1 and abs(relative_speed_angle) > 0.4 and rot_speed >= -0.07:
+        print(4)
+        action = 3
+
+    if abs(relative_angle) < 0.1 and abs(relative_speed_angle) > 0.7:
+        print(5)
+        action = 1
+
+    if abs(relative_angle) < 0.01 and speed < 0.01:
+        print(6)
+        action = 1
+
+    return action
+
 
 def demo_rocket(env, render=False):
     total_reward = 0
@@ -316,9 +358,9 @@ def demo_rocket(env, render=False):
             if still_open is False:
                 break
 
-        if steps % 5 == 0 or terminated or truncated:
-            print("observations:", " ".join([f"{x:+0.2f}" for x in s]))
-            print(f"step {steps} reward {r:+0.2f} total_reward {total_reward:+0.2f}")
+        # if steps % 5 == 0 or terminated or truncated:
+            # print("observations:", " ".join([f"{x:+0.2f}" for x in s]))
+            # print(f"step {steps} reward {r:+0.2f} total_reward {total_reward:+0.2f}")
         steps += 1
         if terminated or truncated:
             break
@@ -328,12 +370,15 @@ def demo_rocket(env, render=False):
 
 
 if __name__ == "__main__":
+    init_rocket_pos_ang = [-0.8, -0.8, np.pi/2 + 0.2]
+    # init_rocket_pos_ang = np.random.uniform([-1.5, -1.5, -np.pi], [0, 0, np.pi])
+
     env = Rocket(
-        rocket_pos_ang_size_mass=(-0.8, -0.5, -np.pi/4, 0.03, 0.1),
+        rocket_pos_ang_size_mass=(*init_rocket_pos_ang, 0.03, 0.1),
         planets_pos_mass=[
-            (0.5, 0.5, 0.5),
-            (-0.5, 0.5, 2),
-            (0.5, -0.5, 3),
+            (0.5, 0.5, 1),
+            # (-0.5, 0.5, 2),
+            (0.75, -0.75, 0.5),
         ],
         render_mode="human"
     )
