@@ -16,9 +16,10 @@ from Box2D.b2 import (
 )
 
 FPS = 30
-SCALE = 1.75
-VIEWPORT_W = 600
-VIEWPORT_H = 400
+SCALE = 2.5
+BOUND = 2 * SCALE
+VIEWPORT_W = 1200
+VIEWPORT_H = 800
 VIEWPORT_MIN = min(VIEWPORT_W, VIEWPORT_H) / SCALE
 TRANSFORM_VEC = lambda xy: vec2(
     (VIEWPORT_W - VIEWPORT_MIN) / 2  + (VIEWPORT_MIN / 2 * (xy[0] + 1)),
@@ -190,7 +191,7 @@ class Rocket(gym.Env):
         pos = self.rocket.position
         vel = self.rocket.linearVelocity
 
-        if max(np.abs(pos)) > 2:
+        if max(np.abs(pos)) > BOUND:
             self.game_over = True
 
         state = [
@@ -302,18 +303,15 @@ class Rocket(gym.Env):
 
 def heuristic(env, s):
     vec2planet = env.planets_pos_mass[0][:2] - s[:2]
-    angle2planet = np.atan2(vec2planet[1], vec2planet[0]) + 3/2*np.pi
-    rocket_angle = s[4]
-    relative_angle = (angle2planet - rocket_angle) % (2*np.pi)
+    angle2planet = np.atan2(vec2planet[1], vec2planet[0]) / np.pi + 3/2
+    rocket_angle = s[4] / np.pi
+    relative_angle = (angle2planet - rocket_angle) % 2
 
-    rocket_speed_dir = np.atan2(s[3], s[2]) + 3/2*np.pi
-    relative_speed_angle = (rocket_speed_dir - angle2planet) % (2*np.pi)
+    rocket_speed_dir = np.atan2(s[3], s[2]) / np.pi + 3/2
+    relative_speed_angle = (rocket_speed_dir - angle2planet) % 2
 
     speed = np.linalg.norm(s[2:4])
     rot_speed = s[5]
-
-    relative_angle = relative_angle / np.pi
-    relative_speed_angle = relative_speed_angle / np.pi
 
     relative_angle = (1 - relative_angle) % 2 - 1
     relative_speed_angle = (1 - relative_speed_angle) % 2 - 1
@@ -370,8 +368,8 @@ def demo_rocket(env, render=False):
 
 
 if __name__ == "__main__":
-    init_rocket_pos_ang = [-0.8, -0.8, np.pi/2 + 0.2]
-    # init_rocket_pos_ang = np.random.uniform([-1.5, -1.5, -np.pi], [0, 0, np.pi])
+    # init_rocket_pos_ang = [-0.8, -0.8, np.pi/2 + 0.2]
+    init_rocket_pos_ang = np.random.normal([-0.25, -0.75, 0], [0.75/3, 0.75/3, np.pi/3])
 
     env = Rocket(
         rocket_pos_ang_size_mass=(*init_rocket_pos_ang, 0.03, 0.1),
