@@ -1,0 +1,8 @@
+relative_angle_threshold: 0.1
+rot_speed_1_threshold: 0.04
+
+relative_speed_angle_1_threshold: 0.04
+rot_speed_2_threshold: 0.07
+
+last_relative_angle_threshold: 0.01
+last_speed_threshold: 0.01

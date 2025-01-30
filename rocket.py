@@ -2,6 +2,12 @@ import math
 
 import numpy as np
 
+from yaml import load
+try:
+    from yaml import CLoader as Loader
+except ImportError:
+    from yaml import Loader
+
 import gymnasium as gym
 from gymnasium.error import DependencyNotInstalled
 from gymnasium.utils.step_api_compatibility import step_api_compatibility
@@ -17,7 +23,7 @@ from Box2D.b2 import (
 
 FPS = 30
 SCALE = 2.5
-BOUND = 2 * SCALE
+BOUND = 1.1 * SCALE
 VIEWPORT_W = 1200
 VIEWPORT_H = 800
 VIEWPORT_MIN = min(VIEWPORT_W, VIEWPORT_H) / SCALE
@@ -59,7 +65,7 @@ class Rocket(gym.Env):
         "render_fps": FPS,
     }
 
-    def __init__(self, rocket_pos_ang_size_mass, planets_pos_mass, render_mode=None):
+    def __init__(self, rocket_pos_ang_size_mass, planets_pos_mass, render_mode=None, config=None):
         self.rocket_pos_ang_size_mass = np.array(rocket_pos_ang_size_mass, dtype=np.float64)
         self.planets_pos_mass = np.array(planets_pos_mass, dtype=np.float64)
 
@@ -67,6 +73,7 @@ class Rocket(gym.Env):
         self.screen = None
         self.clock = None
         self.world = None
+        self.config = config if config else {}
 
         low = np.array(
             [
@@ -302,6 +309,14 @@ class Rocket(gym.Env):
 
 
 def heuristic(env, s):
+    conf = env.config
+    relative_angle_threshold = conf.get('relative_angle_threshold', 0.1)
+    rot_speed_1_threshold = conf.get('rot_speed_1_threshold', 0.04)
+    relative_speed_angle_1_threshold = conf.get('relative_speed_angle_1_threshold', 0.04)
+    rot_speed_2_threshold = conf.get('rot_speed_2_threshold', 0.07)
+    last_relative_angle_threshold = conf.get('last_relative_angle_threshold', 0.01)
+    last_speed_threshold = conf.get('last_speed_threshold', 0.01)
+
     vec2planet = env.planets_pos_mass[0][:2] - s[:2]
     angle2planet = np.atan2(vec2planet[1], vec2planet[0]) / np.pi + 3/2
     rocket_angle = s[4] / np.pi
@@ -317,25 +332,25 @@ def heuristic(env, s):
     relative_speed_angle = (1 - relative_speed_angle) % 2 - 1
 
     action = 0
-    if relative_angle < -0.1 and rot_speed <= 0.04:
+    if relative_angle < -relative_angle_threshold and rot_speed <= rot_speed_1_threshold:
         print(1)
         action = 2
-    elif relative_angle > 0.1 and rot_speed >= -0.04:
+    elif relative_angle > relative_angle_threshold and rot_speed >= -rot_speed_1_threshold:
         print(2)
         action = 3
 
-    if relative_angle < -0.1 and abs(relative_speed_angle) > 0.4 and rot_speed <= 0.07:
+    if relative_angle < -relative_angle_threshold and abs(relative_speed_angle) > relative_speed_angle_1_threshold and rot_speed <= rot_speed_2_threshold:
         print(3)
         action = 2
-    elif relative_angle > 0.1 and abs(relative_speed_angle) > 0.4 and rot_speed >= -0.07:
+    elif relative_angle > relative_angle_threshold and abs(relative_speed_angle) > relative_speed_angle_1_threshold and rot_speed >= -rot_speed_2_threshold:
         print(4)
         action = 3
 
-    if abs(relative_angle) < 0.1 and abs(relative_speed_angle) > 0.7:
+    if abs(relative_angle) < relative_angle_threshold and abs(relative_speed_angle) > 0.7:
         print(5)
         action = 1
 
-    if abs(relative_angle) < 0.01 and speed < 0.01:
+    if abs(relative_angle) < last_relative_angle_threshold and speed < last_speed_threshold:
         print(6)
         action = 1
 
@@ -367,7 +382,13 @@ def demo_rocket(env, render=False):
     return total_reward
 
 
+def read_config(filename):
+    with open(filename, 'r') as file:
+        config = load(file, Loader=Loader)
+    return config
+
 if __name__ == "__main__":
+    config = read_config('config.yaml')
     # init_rocket_pos_ang = [-0.8, -0.8, np.pi/2 + 0.2]
     init_rocket_pos_ang = np.random.normal([-0.25, -0.75, 0], [0.75/3, 0.75/3, np.pi/3])
 
@@ -378,6 +399,7 @@ if __name__ == "__main__":
             # (-0.5, 0.5, 2),
             (0.75, -0.75, 0.5),
         ],
-        render_mode="human"
+        render_mode="human",
+        config=config
     )
     demo_rocket(env, render=True)
