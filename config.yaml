@@ -22,10 +22,27 @@ planets:
   # - [-0.7, 0.55, 0.7]
   # - [0.7, 0, 0.4]
 
-# seed: 779075522
-# seed: 946061787  # orbiting
-# seed: 679239139
+
+# orbit
+# seed: 946061787
+
+# perfect landing
+# seed: 93634969
+# seed: 1012676223
 # seed: 997813027
+
+# direct
+# seed: 1387981680
+# seed: 1635960376
+# seed: 1117710387
+
+# near miss
+# seed: 679239139
+
+# almost an orbit
+# seed: 688416949
+# seed: 2027746146
+
 
 environment:
   fps: 30
