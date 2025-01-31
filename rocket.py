@@ -21,24 +21,6 @@ from Box2D.b2 import (
     vec2,
 )
 
-FPS = 30
-SCALE = 2.5
-BOUND = 1.1 * SCALE
-VIEWPORT_W = 1200
-VIEWPORT_H = 800
-VIEWPORT_MIN = min(VIEWPORT_W, VIEWPORT_H) / SCALE
-TRANSFORM_VEC = lambda xy: vec2(
-    (VIEWPORT_W - VIEWPORT_MIN) / 2  + (VIEWPORT_MIN / 2 * (xy[0] + 1)),
-    (VIEWPORT_H - VIEWPORT_MIN) / 2 + (VIEWPORT_MIN / 2 * (xy[1] + 1)),
-)
-TRANSFORM_RADIUS = lambda r: r * VIEWPORT_MIN / 2
-GRAVITY_CONST = 1e-3
-PLANET_DENS = 10
-EPS = 1e-6
-PULSE_POWER = 2e-4
-ROTATION_POWER = 5e-8
-RAD2DEG = lambda x: x * 180 / np.pi
-
 
 class ContactDetector(contactListener):
     def __init__(self, env):
@@ -60,11 +42,6 @@ class ContactDetector(contactListener):
 
 class Rocket(gym.Env):
 
-    metadata = {
-        "render_modes": ["human", "rgb_array"],
-        "render_fps": FPS,
-    }
-
     def __init__(self, rocket_pos_ang_size_mass, planets_pos_mass, render_mode=None, config=None):
         self.rocket_pos_ang_size_mass = np.array(rocket_pos_ang_size_mass, dtype=np.float64)
         self.planets_pos_mass = np.array(planets_pos_mass, dtype=np.float64)
@@ -74,6 +51,31 @@ class Rocket(gym.Env):
         self.clock = None
         self.world = None
         self.config = config if config else {}
+
+        env_config = self.config.get('environment', {})
+
+        self.fps = int(env_config.get('fps', 30))
+        self.scale = float(env_config.get('scale', 2.5))
+        self.bound = float(env_config.get('bound', 1.1 * self.scale))
+        self.viewport_w = int(env_config.get('viewport_w', 1200))
+        self.viewport_h = int(env_config.get('viewport_h', 800))
+        self.gravity_const = float(env_config.get('gravity_const', 1e-3))
+        self.planet_dens = float(env_config.get('planet_dens', 10))
+        self.eps = float(env_config.get('eps', 1e-6))
+        self.pulse_power = float(env_config.get('pulse_power', 2e-4))
+        self.rotation_power = float(env_config.get('rotation_power', 5e-8))
+
+        self.viewport_min = min(self.viewport_w, self.viewport_h) / self.scale
+        self.transform_vec = lambda xy: vec2(
+            (self.viewport_w - self.viewport_min) / 2  + (self.viewport_min / 2 * (xy[0] + 1)),
+            (self.viewport_h - self.viewport_min) / 2 + (self.viewport_min / 2 * (xy[1] + 1)),
+        )
+        self.transform_radius = lambda r: r * self.viewport_min / 2
+
+        self.metadata = {
+            "render_modes": ["human", "rgb_array"],
+            "render_fps": self.fps,
+        }
 
         low = np.array(
             [
@@ -147,7 +149,7 @@ class Rocket(gym.Env):
             planet = self.world.CreateStaticBody(
                 position=planet_pos_mass[:2], angle=0.0,
                 fixtures=fixtureDef(
-                    shape=circleShape(radius=planet_pos_mass[2] / PLANET_DENS)
+                    shape=circleShape(radius=planet_pos_mass[2] / self.planet_dens)
                 )
             )
             planet.color1 = (255, 255, 255)
@@ -169,17 +171,17 @@ class Rocket(gym.Env):
 
         if action == 1:
             unit_v = vec2(-np.sin(self.rocket.angle), np.cos(self.rocket.angle))
-            force = PULSE_POWER * unit_v
+            force = self.pulse_power * unit_v
             self.rocket.ApplyForceToCenter(force, True)
 
         if action == 2:
             self.rocket.ApplyAngularImpulse(
-                ROTATION_POWER,
+                self.rotation_power,
                 True,
             )
         elif action == 3:
             self.rocket.ApplyAngularImpulse(
-                -ROTATION_POWER,
+                -self.rotation_power,
                 True,
             )
 
@@ -188,26 +190,26 @@ class Rocket(gym.Env):
             delta = vec2(x, y) - self.rocket.position
             dist = np.linalg.norm(delta)
 
-            acc += delta * mass / (dist ** 3 + EPS)
+            acc += delta * mass / (dist ** 3 + self.eps)
 
-        force = acc * GRAVITY_CONST * self.rocket_mass
+        force = acc * self.gravity_const * self.rocket_mass
         self.rocket.ApplyForceToCenter(force, True)
 
-        self.world.Step(1.0 / FPS, 6 * 30, 2 * 30)
+        self.world.Step(1.0 / self.fps, 6 * 30, 2 * 30)
 
         pos = self.rocket.position
         vel = self.rocket.linearVelocity
 
-        if max(np.abs(pos)) > BOUND:
+        if max(np.abs(pos)) > self.bound:
             self.game_over = True
 
         state = [
             pos.x,
             pos.y,
-            vel.x / FPS,
-            vel.y / FPS,
+            vel.x / self.fps,
+            vel.y / self.fps,
             self.rocket.angle,
-            self.rocket.angularVelocity / FPS,
+            self.rocket.angularVelocity / self.fps,
         ] + [
             np.linalg.norm(vec2(x, y) - pos)
             for (x, y, _) in self.planets_pos_mass
@@ -253,11 +255,11 @@ class Rocket(gym.Env):
         if self.screen is None and self.render_mode == "human":
             pygame.init()
             pygame.display.init()
-            self.screen = pygame.display.set_mode((VIEWPORT_W, VIEWPORT_H))
+            self.screen = pygame.display.set_mode((self.viewport_w, self.viewport_h))
         if self.clock is None:
             self.clock = pygame.time.Clock()
 
-        self.surf = pygame.Surface((VIEWPORT_W, VIEWPORT_H))
+        self.surf = pygame.Surface((self.viewport_w, self.viewport_h))
 
         self.surf.fill((0, 0, 0))
 
@@ -268,18 +270,18 @@ class Rocket(gym.Env):
                     pygame.draw.circle(
                         self.surf,
                         color=obj.color1,
-                        center=TRANSFORM_VEC(trans * f.shape.pos),
-                        radius=TRANSFORM_RADIUS(f.shape.radius),
+                        center=self.transform_vec(trans * f.shape.pos),
+                        radius=self.transform_radius(f.shape.radius),
                     )
                     pygame.draw.circle(
                         self.surf,
                         color=obj.color2,
-                        center=TRANSFORM_VEC(trans * f.shape.pos),
-                        radius=TRANSFORM_RADIUS(f.shape.radius),
+                        center=self.transform_vec(trans * f.shape.pos),
+                        radius=self.transform_radius(f.shape.radius),
                     )
 
                 else:
-                    path = [TRANSFORM_VEC(trans * v) for v in f.shape.vertices]
+                    path = [self.transform_vec(trans * v) for v in f.shape.vertices]
                     pygame.draw.polygon(self.surf, color=obj.color1, points=path)
                     gfxdraw.aapolygon(self.surf, path, obj.color1)
                     pygame.draw.aalines(
@@ -310,12 +312,12 @@ class Rocket(gym.Env):
 
 def heuristic(env, s):
     conf = env.config
-    relative_angle_threshold = conf.get('relative_angle_threshold', 0.1)
-    rot_speed_1_threshold = conf.get('rot_speed_1_threshold', 0.04)
-    relative_speed_angle_1_threshold = conf.get('relative_speed_angle_1_threshold', 0.04)
-    rot_speed_2_threshold = conf.get('rot_speed_2_threshold', 0.07)
-    last_relative_angle_threshold = conf.get('last_relative_angle_threshold', 0.01)
-    last_speed_threshold = conf.get('last_speed_threshold', 0.01)
+    relative_angle_threshold = float(conf.get('relative_angle_threshold', 0.1))
+    rot_speed_1_threshold = float(conf.get('rot_speed_1_threshold', 0.04))
+    relative_speed_angle_1_threshold = float(conf.get('relative_speed_angle_1_threshold', 0.04))
+    rot_speed_2_threshold = float(conf.get('rot_speed_2_threshold', 0.07))
+    last_relative_angle_threshold = float(conf.get('last_relative_angle_threshold', 0.01))
+    last_speed_threshold = float(conf.get('last_speed_threshold', 0.01))
 
     vec2planet = env.planets_pos_mass[0][:2] - s[:2]
     angle2planet = np.atan2(vec2planet[1], vec2planet[0]) / np.pi + 3/2
@@ -389,16 +391,19 @@ def read_config(filename):
 
 if __name__ == "__main__":
     config = read_config('config.yaml')
-    # init_rocket_pos_ang = [-0.8, -0.8, np.pi/2 + 0.2]
-    init_rocket_pos_ang = np.random.normal([-0.25, -0.75, 0], [0.75/3, 0.75/3, np.pi/3])
+    rocket_config = config.get('rocket', {})
+    rocket_loc = rocket_config.get('loc', [-0.25, -0.75, 0])
+    rocket_scale = rocket_config.get('scale', [0.25, 0.25, 1.047])
+    init_rocket_pos_ang = np.random.normal(rocket_loc, rocket_scale)
+
+    planets_config = config.get('planets', [
+        [0.5, 0.5, 1],
+        [0.75, -0.75, 0.5],
+    ])
 
     env = Rocket(
         rocket_pos_ang_size_mass=(*init_rocket_pos_ang, 0.03, 0.1),
-        planets_pos_mass=[
-            (0.5, 0.5, 1),
-            # (-0.5, 0.5, 2),
-            (0.75, -0.75, 0.5),
-        ],
+        planets_pos_mass=planets_config,
         render_mode="human",
         config=config
     )
