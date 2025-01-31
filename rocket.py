@@ -1,4 +1,5 @@
 import math
+import sys
 
 import numpy as np
 
@@ -141,8 +142,8 @@ class Rocket(gym.Env):
                 density=self.rocket_mass,
             )
         )
-        self.rocket.color1 = (128, 128, 128)
-        self.rocket.color2 = (128, 128, 128)
+        self.rocket.color1 = (0, 255, 255)
+        self.rocket.color2 = (0, 255, 255)
 
         self.planets = []
         for planet_pos_mass in self.planets_pos_mass:
@@ -392,6 +393,12 @@ def read_config(filename):
 
 if __name__ == "__main__":
     config = read_config('config.yaml')
+    seed = config.get('seed')
+    if seed is None:
+        seed = np.random.randint(0, 2 << 30)
+    print(f'{seed = }')
+    sys.stdout.flush()
+    np.random.seed(seed)
     rocket_config = config.get('rocket', {})
     rocket_loc = rocket_config.get('loc', [-0.25, -0.75, 0])
     rocket_scale = rocket_config.get('scale', [0.25, 0.25, 1.047])
