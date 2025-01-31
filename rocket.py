@@ -313,11 +313,12 @@ class Rocket(gym.Env):
 def heuristic(env, s):
     conf = env.config
     relative_angle_threshold = float(conf.get('relative_angle_threshold', 0.1))
-    rot_speed_1_threshold = float(conf.get('rot_speed_1_threshold', 0.04))
-    relative_speed_angle_1_threshold = float(conf.get('relative_speed_angle_1_threshold', 0.04))
-    rot_speed_2_threshold = float(conf.get('rot_speed_2_threshold', 0.07))
-    last_relative_angle_threshold = float(conf.get('last_relative_angle_threshold', 0.01))
-    last_speed_threshold = float(conf.get('last_speed_threshold', 0.01))
+    target_rot_speed_threshold = float(conf.get('target_rot_speed_threshold', 0.04))
+    danger_angle_threshold = float(conf.get('danger_angle_threshold', 0.04))
+    emergency_rot_speed_threshold = float(conf.get('emergency_rot_speed_threshold', 0.07))
+    target_relative_angle = float(conf.get('target_relative_angle', 0.01))
+    danger_pull_angle_threshold = float(conf.get('danger_pull_angle_threshold', 0.7))
+    target_speed = float(conf.get('target_speed', 0.01))
 
     vec2planet = env.planets_pos_mass[0][:2] - s[:2]
     angle2planet = np.atan2(vec2planet[1], vec2planet[0]) / np.pi + 3/2
@@ -334,25 +335,25 @@ def heuristic(env, s):
     relative_speed_angle = (1 - relative_speed_angle) % 2 - 1
 
     action = 0
-    if relative_angle < -relative_angle_threshold and rot_speed <= rot_speed_1_threshold:
+    if relative_angle < -relative_angle_threshold and rot_speed <= target_rot_speed_threshold:
         print(1)
         action = 2
-    elif relative_angle > relative_angle_threshold and rot_speed >= -rot_speed_1_threshold:
+    elif relative_angle > relative_angle_threshold and rot_speed >= -target_rot_speed_threshold:
         print(2)
         action = 3
 
-    if relative_angle < -relative_angle_threshold and abs(relative_speed_angle) > relative_speed_angle_1_threshold and rot_speed <= rot_speed_2_threshold:
+    if relative_angle < -relative_angle_threshold and abs(relative_speed_angle) > danger_angle_threshold and rot_speed <= emergency_rot_speed_threshold:
         print(3)
         action = 2
-    elif relative_angle > relative_angle_threshold and abs(relative_speed_angle) > relative_speed_angle_1_threshold and rot_speed >= -rot_speed_2_threshold:
+    elif relative_angle > relative_angle_threshold and abs(relative_speed_angle) > danger_angle_threshold and rot_speed >= -emergency_rot_speed_threshold:
         print(4)
         action = 3
 
-    if abs(relative_angle) < relative_angle_threshold and abs(relative_speed_angle) > 0.7:
+    if abs(relative_angle) < relative_angle_threshold and abs(relative_speed_angle) > danger_pull_angle_threshold:
         print(5)
         action = 1
 
-    if abs(relative_angle) < last_relative_angle_threshold and speed < last_speed_threshold:
+    if abs(relative_angle) < target_relative_angle and speed < target_speed:
         print(6)
         action = 1
 
